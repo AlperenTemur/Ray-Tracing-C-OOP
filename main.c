@@ -4,7 +4,7 @@
 //#define AA //Uncomment for activate antialiasing
 //#define DoF 5//Uncomment both lines for activate depth of field
 //#define DoFy 4//Uncomment both lines for activate depth of field 
-#include "RayTrace0.7.5.h"
+#include "RayTracer.h"
 #include "bmpwriter.h"
 #include <time.h>
 
