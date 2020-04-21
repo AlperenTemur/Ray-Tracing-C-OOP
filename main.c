@@ -28,7 +28,7 @@ printf("%d\n",sizeof(Object));
     diff = clock() - start;
     int msec = diff * 1000 / CLOCKS_PER_SEC;
     bmpdraw(I);
-    bmpsave("RT4.bmp",X,Y);
+    bmpsave("RT4.bmp");
     printf("%dx%d  ",X,Y);
     printf("%.2f FPS\n%d frames in %d seconds %d milliseconds\n",1000.0*FRAMES/msec,FRAMES,msec/1000, msec%1000);
     #ifdef _OPENMP
