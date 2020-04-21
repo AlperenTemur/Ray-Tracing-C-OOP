@@ -1,4 +1,4 @@
-//May not compile without -lm and -O3
+//May need -lm and -O3 for compile
 #include <stdio.h>
 #include <math.h>
 #include <stdlib.h>
@@ -16,13 +16,13 @@
 //#define PROFILE
 #if defined(PROFILE) && defined(__GNUC__)
    #define PROFILEFUNC __attribute__((noinline))
-   #define PROForINLINE __attribute__((noinline))
+   #define PROFILEorINLINE __attribute__((noinline))
 #else
    #define PROFILEFUNC 
-   #define PROForINLINE inline
+   #define PROFILEorINLINE inline
 #endif
 #define IMP 0.1
-#define TDS(X) typedef struct X X;struct X;
+#define TDS(X) typedef struct X X;
 #define MAX_FLOAT 9999999999999
 
 TDS(Point)
@@ -36,8 +36,15 @@ TDS(Light)
 TDS(Scene)
 TDS(Image)
 
-unsigned char *BMP;
-int X=640,Y=400;
+int X,Y,HX,HY;
+float FX=0;
+
+float fastInvSqrt(float x) {
+  int i = *(int*)&x;
+  i = 0x5f3759df - (i >> 1);
+  float y = *(float*)&i;
+  return y * (1.5F - 0.5F * x * y * y);
+}
 struct Point
 {
     float x,y,z;
@@ -50,7 +57,7 @@ Vec3  Vadd(Vec3 a,Vec3 b)
 {
     return (struct Vec3){a.x+b.x,a.y+b.y,a.z+b.z};
 }
-Point  PVadd(Point a,Vec3 b)
+Point  Pshift(Point a,Vec3 b)
 {
     return (struct Point){a.x+b.x,a.y+b.y,a.z+b.z};
 }
@@ -60,25 +67,32 @@ Vec3  Psub(Point a,Point b)
     return (struct Vec3){a.x-b.x,a.y-b.y,a.z-b.z};
 }
 
-Point  pPVadd(Point *a,Vec3 *b)
+Point  pPshift(Point *a,Vec3 *b)
 {
     a->x+=b->x;
     a->y+=b->y;
     a->z+=b->z;
 }
-float fastInvSqrt(float x) {
-  int i = *(int*)&x;
-  i = 0x5f3759df - (i >> 1);
-  float y = *(float*)&i;
-  return y * (1.5F - 0.5F * x * y * y);
-}
-float invVMag(Vec3 a)
+
+Vec3  Vsub(Vec3 a,Vec3 b)
 {
-    return fastInvSqrt(a.x*a.x+a.y*a.y+a.z*a.z);
+    return (struct Vec3){a.x-b.x,a.y-b.y,a.z-b.z};
 }
+PROFILEFUNC
+float VSmul(Vec3 a,Vec3 b)
+{
+    return a.x*b.x+a.y*b.y+a.z*b.z;
+}
+Vec3  VCross(Vec3 a,Vec3 b)
+{
+    return (struct Vec3){a.y*b.z-a.z*b.y,
+                          a.z*b.x-a.x*b.z,
+                          a.x*b.y-a.y*b.x};
+}
+
 void  pNorm(Vec3 *a)//Normalize
 {
-    #ifdef FAST//Using fastInvSqrt here tortures image quality a lot.
+    #ifdef FFAST//Using fastInvSqrt here tortures image quality a lot.
       float imag=fastInvSqrt(a->x*a->x+a->y*a->y+a->z*a->z);
     #else
       float imag=1/sqrt(a->x*a->x+a->y*a->y+a->z*a->z);
@@ -87,23 +101,6 @@ void  pNorm(Vec3 *a)//Normalize
     a->y*=imag;
     a->z*=imag;
 }
-Vec3  Vsub(Vec3 a,Vec3 b)
-{
-    return (struct Vec3){a.x-b.x,a.y-b.y,a.z-b.z};
-}
-PROFILEFUNC
-float VSmul(Vec3 a,Vec3 b)//Dot
-{
-    return a.x*b.x+a.y*b.y+a.z*b.z;
-}
-
-Vec3  Vmul(Vec3 a,Vec3 b)//Cross
-{
-    return (struct Vec3){a.y*b.z-a.z*b.y,
-                          a.z*b.x-a.x*b.z,
-                          a.x*b.y-a.y*b.x};
-}
-
 PROFILEFUNC
 Vec3  Norm(Vec3 a)//Normalized
 {
@@ -118,9 +115,9 @@ float VMag(Vec3 a)
 }
 Vec3  Vscale(Vec3 a,float mag)//Scale
 {
-    mag*=fastInvSqrt(a.x*a.x+a.y*a.y+a.z*a.z);
     return (struct Vec3){a.x*mag,a.y*mag,a.z*mag};
 }
+
 
 struct Camera
 {
@@ -144,7 +141,7 @@ Color CScale(float A,Color C)
     Color c;
     c.r=r>255 ? 255 : (r<0 ? 0 : r);
     c.g=g>255 ? 255 : (g<0 ? 0 : g);
-    c.b=b>255 ? 255 : (b<0 ? 0 : b);;
+    c.b=b>255 ? 255 : (b<0 ? 0 : b);
     return c;
 }
 Color CMul(Color A,Color B)
@@ -166,21 +163,10 @@ struct Image
     int width,height;
     Color *Pixels;
 };
+
 Image NewImage(int x,int y)
 {
     return (struct Image){x,y,(Color*)malloc(x*y*sizeof(Color))};
-}
-
-Point PixelPos(int x, int y)
-{
-    return (struct Point){x-(X/2),y-(Y/2),100};
-}
-Ray RayofPix(Point cam_pos,int x,int y)
-{
-    Point p=PixelPos(x,y);
-    Vec3 dir=Psub(p,cam_pos);
-    pNorm(&dir);
-    return (struct Ray){cam_pos,dir};
 }
 
 struct Sphere
@@ -189,16 +175,15 @@ struct Sphere
     float r;
 };
 #define SPHERE 1
-
 struct Object
 {
-    int type;
-    float MathA,MathB;
-    Color color;
     union
     {
        Sphere sphere;
     }u;
+    unsigned char type;
+    Color color;    
+    float diffuse,reflection;
 };
 
 struct Light
@@ -215,32 +200,7 @@ struct Scene
     Light  *Lights;
 };
 
-
-PROFILEFUNC
-Color shade(Scene scene,Point P,int obj)
-{
-    Object Obj=scene.Objects[obj];
-    if(Obj.type=SPHERE)
-    {
-        Vec3 SufNorm=Norm(Psub(P,Obj.u.sphere.C));
-        int i=0,NL=scene.numLight;
-        Color ret,c;
-        Vec3 PtoLight;
-        float idist;
-        for(i=0;i<NL;i++)
-        {
-          PtoLight=Psub(scene.Lights[i].pos,P);
-          idist=invVMag(PtoLight);idist*=idist*idist;
-          idist=VSmul(SufNorm,PtoLight)*idist;         
-          c=CScale(idist*scene.Lights[i].x,CMul(Obj.color,scene.Lights[i].color));
-          ret=CSCom(ret,c,(i<1?1:i)/(float)(i+1));
-        }
-        return ret;
-    }
-}
-
-
-PROForINLINE
+PROFILEorINLINE
 float intersect(Ray ray,Object obj)
 {
    if(likely(obj.type=SPHERE))
@@ -253,40 +213,158 @@ float intersect(Ray ray,Object obj)
       return dist2 > r2? -0.0: tca-sqrt(r2 - dist2);          
    }
 }
-PROFILEFUNC
-Color RayTrace(Ray ray,Scene scene,float imp,const int numObj)
+
+PROFILEorINLINE
+Color shade(Point P,int obji,int numObj,Object *Objects,int NL,Light* Lights)
 {
+    Object Obj=Objects[obji];
+    if(Obj.type=SPHERE)
+    {
+        Vec3 SufNorm=Psub(P,Obj.u.sphere.C);
+        pNorm(&SufNorm);
+        int i=0;      
+        float g,b,r=g=b=0,x;       
+        for(i=0;i<NL;i++)
+        {
+          Light light=Lights[i];
+          Vec3 PtoLight=Psub(light.pos,P);
+          float dist=VMag(PtoLight);
+          float InvDist=1/dist;
+          PtoLight=Vscale(PtoLight,InvDist);//Normalize
+          int j;
+          float min=MAX_FLOAT;
+          for(j=0;j<numObj;j++)
+             min=(x=intersect((struct Ray){P,PtoLight},Objects[j]))?(x<min?x:min):min;
+          if(min!=MAX_FLOAT&&min<dist) continue;
+          /*
+          |N|=1
+          cosa=Vmul(PtoLight,N)/|PtoLight|
+          dist=|PtoLight|
+          cosa/dist2=VMul(PtoLight,N)/(|PtoLight|*|PtoLight|*|PtoLight|)
+          
+          InvDist2=1/(|PtoLight|^2)
+          x=cosa/dist2=VMul(PtoLight,N)*(1/(|PtoLight|^3)=VMul(NormalizedPtoLight,N)*InvDist2
+          */
+		  InvDist*=InvDist;
+          x=VSmul(SufNorm,PtoLight)*light.x*InvDist;
+		  r+=x>0?x*light.color.r:0;
+		  g+=x>0?x*light.color.g:0;
+		  b+=x>0?x*light.color.b:0;
+    	}
+    	unsigned char r2,g2,b2;
+    	r*=Obj.color.r;
+    	g*=Obj.color.g;
+    	b*=Obj.color.b;
+    	r2=r<255?r:255;
+    	g2=g<255?g:255;
+    	b2=b<255?b:255;
+        return (struct Color){r2,g2,b2};
+    }
+}
+
+#ifdef WIN32
+    inline
+#else
+    PROFILEFUNC
+#endif 
+Color RayTrace(const Ray ray,Scene scene,const float imp)
+{
+    const int numObj=scene.numObj;
     int i=0,firsti=-1;float min=MAX_FLOAT,dist;
     Object *O=scene.Objects;
     Object obj;
     for(i=0;i<numObj;i++)
-    {   dist=intersect(ray,O[i]);
+    {   
+		dist=intersect(ray,O[i]);
         firsti=(dist&&dist<min)?i:firsti;
         min=(dist&&dist<min)?dist:min;       
-    }  
-    if(firsti==-1)return (struct Color){0,0,0};
+    }
+    if(firsti==-1)return (struct Color){255,255,255};
     obj=O[firsti];
     if(likely(obj.type==SPHERE))
     {
-        Point intersectionP=PVadd(ray.start,Vscale(ray.dir,min));
-        Color c1=CScale(obj.MathA,shade(scene,intersectionP,firsti));
-        Color c2;
-        if(unlikely(obj.MathB*imp>IMP))
-          c2=RayTrace((struct Ray){intersectionP, Norm(Psub(intersectionP,obj.u.sphere.C))},scene,obj.MathB*imp,numObj);
-       return c1;
+        Point intersectionP=Pshift(ray.start,Vscale(ray.dir,min));
+        Color c=CScale(obj.diffuse,shade(intersectionP,firsti,numObj,O,scene.numLight,scene.Lights));
+        if(unlikely(obj.reflection*imp>IMP))
+          c=CSCom(c,RayTrace((struct Ray){intersectionP, Norm(Psub(intersectionP,obj.u.sphere.C))},scene,obj.reflection*imp),obj.reflection);
+       return c;
     }
+} 
+Ray RayofPix(Point cam_pos,Vec3 cam_dir,Vec3 up,Vec3 right,float x,float y)
+{
+    Vec3 dir=Vadd(cam_dir,Vadd(Vscale(right,(x-HX)*FX),Vscale(up,(y-HY)*FX)));
+    pNorm(&dir);
+    return (struct Ray){cam_pos,dir};
 }
 void RTRender(Image* I,Camera cam,Scene scene)
 {
-    int x,y;
-    Point cam_pos={0,0,0};
+    HX=X/2,HY=Y/2;
+    if(FX==0)
+      FX=VMag(cam.dir)/X;
+    Point cam_pos=cam.pos;
+    Vec3 cam_dir=cam.dir;pNorm(&cam_dir);
+    Vec3 up,right;
+    right=VCross(cam_dir,(struct Vec3){0,-1,0});pNorm(&right);
+	up=VCross(cam_dir,right);
+	if(up.y<0)up=VCross(right,cam_dir);
+	
     Color* P=I->Pixels;
-    int numObj=scene.numObj;
-    
+    const int numObj=scene.numObj;
+    #if defined(WIN32) || defined(_WIN32)
+    	#define RTNoInline
+	#endif
+    int x,y;
+    #pragma omp parallel for private(x) 
     for(y=0;y<Y;y++)
-        #pragma omp parallel for        
+        #pragma omp task
         for(x=0;x<X;x++)
-            P[y*X+x]=RayTrace(RayofPix(cam_pos,x,y),scene,1.0,numObj);
-}
+        #if !defined(DoF) && !defined(AA) && defined(RTNoInline)//Simple Ray Tracing, Readable Code
+            P[y*X+x]=RayTrace(RayofPix(cam.pos,cam_dir,up,right,x,y),scene,1.0);
+        #elif !defined(DoF) && !defined(AA) //Inlined RayTrace Function for performance
+        {                 
+            Ray ray=RayofPix(cam_pos,cam_dir,up,right,x,y);
+            int i=0,firsti=-1;float min=MAX_FLOAT,dist;
+            Object *O=scene.Objects;
+            Object obj;
+            for(i=0;i<numObj;i++)
+            {   
+		        dist=intersect(ray,O[i]);
+                firsti=(dist&&dist<min)?i:firsti;
+                min=(dist&&dist<min)?dist:min;       
+            }
+            if(firsti==-1){P[y*X+x]=(struct Color){255,255,255};continue;}
+            obj=O[firsti];
+            if(likely(obj.type==SPHERE))
+            {
+                Point intersectionP=Pshift(ray.start,Vscale(ray.dir,min));
+                Color c=CScale(obj.diffuse,shade(intersectionP,firsti,numObj,O,scene.numLight,scene.Lights));
+                if(unlikely(obj.reflection>IMP))
+                  c=CSCom(c,RayTrace((struct Ray){intersectionP, Norm(Psub(intersectionP,obj.u.sphere.C))},scene,obj.reflection),obj.reflection);
+               P[y*X+x]=c;
+            }
+        }
 
+        #elif defined(DoF) defined(DoFy)//Antialiasing and Depth of Field
+        {
+            Point lcam_pos=cam_pos;
+        	P[y*X+x]=RayTrace(RayofPix(cam_pos,cam_dir,up,right,x,y),scene,1.0);
+        	lcam_pos=Pshift(Pshift(cam.pos,Vscale(up,DoF)),Vscale(right,DoF));
+        	P[y*X+x]=CSCom(P[y*X+x],RayTrace(RayofPix(lcam_pos,cam_dir,up,right,x-DoFy,y-DoFy),scene,1.0),1/2.0);
+        	lcam_pos=Pshift(Pshift(cam.pos,Vscale(up,-DoF)),Vscale(right,DoF));
+        	P[y*X+x]=CSCom(P[y*X+x],RayTrace(RayofPix(lcam_pos,cam_dir,up,right,x-DoFy,y+DoFy),scene,1.0),1/3.0);
+        	lcam_pos=Pshift(Pshift(cam.pos,Vscale(up,DoF)),Vscale(right,-DoF));
+        	P[y*X+x]=CSCom(P[y*X+x],RayTrace(RayofPix(lcam_pos,cam_dir,up,right,x+DoFy,y-DoFy),scene,1.0),1/4.0);
+        	lcam_pos=Pshift(Pshift(cam.pos,Vscale(up,-DoF)),Vscale(right,-DoF));
+        	P[y*X+x]=CSCom(P[y*X+x],RayTrace(RayofPix(lcam_pos,cam_dir,up,right,x+DoFy,y+DoFy),scene,1.0),1/5.0);
+		}
+        #else //Antialiasing
+        {
+            P[y*X+x]=RayTrace(RayofPix(cam_pos,cam_dir,up,right,x,y),scene,1.0);
+            P[y*X+x]=CSCom(P[y*X+x],RayTrace(RayofPix(cam_pos,cam_dir,up,right,x+0.25,y+0.25),scene,1.0),1/2.0);
+            P[y*X+x]=CSCom(P[y*X+x],RayTrace(RayofPix(cam_pos,cam_dir,up,right,x-0.25,y+0.25),scene,1.0),1/3.0);
+            P[y*X+x]=CSCom(P[y*X+x],RayTrace(RayofPix(cam_pos,cam_dir,up,right,x+0.25,y-0.25),scene,1.0),1/4.0);
+            P[y*X+x]=CSCom(P[y*X+x],RayTrace(RayofPix(cam_pos,cam_dir,up,right,x-0.25,y-0.25),scene,1.0),1/5.0);
+		}
+        #endif
+}
 

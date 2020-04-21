@@ -1,9 +1,14 @@
-#include "RayTracer.h"
-#include "BmpWriter.h"
+//May need -lm and -O3 for compile
+//Enable vectorization and OpenMP for best performance
+
+//#define AA //Uncomment for activate antialiasing
+//#define DoF 5//Uncomment both lines for activate depth of field
+//#define DoFy 4//Uncomment both lines for activate depth of field 
+#include "RayTrace0.7.5.h"
+#include "bmpwriter.h"
 #include <time.h>
 
-
-void testintersection();
+int FRAMES;
 void testRT();
 void bmpdraw(Image I)
 {
@@ -12,51 +17,89 @@ void bmpdraw(Image I)
    for(j=0;j<Y;j++)
      putpixel(i+1,j+1,I.Pixels[(Y-j-1)*X+i].r,I.Pixels[(Y-j-1)*X+i].g,I.Pixels[(Y-j-1)*X+i].b);
 }
-main()
+int main()
 {   
+printf("%d\n",sizeof(Object));
+	X=1920,Y=1080,FRAMES=300;
+    bmpinit(X,Y);
+    Image I=NewImage(X,Y);
     clock_t start = clock(), diff;
-    testRT(); 
+    testRT(&I); 
     diff = clock() - start;
     int msec = diff * 1000 / CLOCKS_PER_SEC;
-    printf("%.2f FPS %d seconds %d milliseconds",60000.0/msec,msec/1000, msec%1000);    
-    //int a;scanf("%d",&a);printf("%d",a);                                      
+    bmpdraw(I);
+    bmpsave("RT4.bmp",X,Y);
+    printf("%dx%d  ",X,Y);
+    printf("%.2f FPS\n%d frames in %d seconds %d milliseconds\n",1000.0*FRAMES/msec,FRAMES,msec/1000, msec%1000);
+    #ifdef _OPENMP
+    	printf("OPENMP Enabled.\n");
+    	printf("Timing may work wrong if compiled OpenMP enabled under Linux/UNIX\n"); 
+    #else
+    	printf("OPENMP Disabled.\n");
+    #endif                                     
 }
 PROFILEFUNC
-void testRT()
+void testRT(Image* I)
 {
-    int x=0,y;
-    Point s1c={0,0,200};
-    Vec3 camdir={0,0,100};
-    Point campos={0,0,0};
+	
+	Vec3 camdir={0,0,1};
+    Point campos={0,0,-1600};
+   /* Vec3 camdir={0,-1,1};
+    Point campos={0,1000,-1000};*/
     Camera cam={campos,camdir};
-    Color c1={50,250,255};
-    Sphere s={s1c,70};
-    Object Obj={SPHERE,0.8,0.0,c1,s};
+    int x;
+    Point s1c={0,0,300};
+    Color c1={5,100,255};
+    Sphere s={s1c,250};
+    Object Obj={s,SPHERE,c1,0.8,0.2};
 
-    Point s1c2={-100,0,270};
-    Color c2={255,50,50};
-    Sphere s2={s1c2,90};
-    Object Obj2={SPHERE,0.8,0.0,c2,s2};
-    Object *Objects=(Object*)malloc(sizeof(Object)*2);
+    Point s1c2={-600,50,320};
+    Color c2={240,250,255};
+    Sphere s2={s1c2,300};
+    Object Obj2={s2,SPHERE,c2,0.92,0.90};
+    
+    Point s3c={-0,-100000,100};
+    Color c3={255,255,255};
+    Sphere s3={s3c,100000-250};
+    Object Obj3={s3,SPHERE,c3,1,0.2};
+    
+    Point s4c={-300,-210,100};
+    Color c4={255,100,5};
+    Sphere s4={s4c,40};
+    Object Obj4={s4,SPHERE,c4,1,0};
+    
+    Point s5c={-100,-210,-50};
+    Color c5={0,255,0};
+    Sphere s5={s5c,40};
+    Object Obj5={s5,SPHERE,c5,1,0};
+    
+    Point s6c={700,-210,3700};
+    Color c6={0,255,0};
+    Sphere s6={s6c,40};
+    Object Obj6={s6,SPHERE,c6,1,0};
+    
+    Object *Objects=(Object*)malloc(sizeof(Object)*6);
     Objects[0]=Obj;
     Objects[1]=Obj2;
-    Light *Lights=(Light*)malloc(sizeof(Light)*2);
-    Point Pos={0,220,160};
-    Color lc1={255,255.255};
-    Lights[0]=(struct Light){Pos,lc1,100000.0};
-    Point Pos2={300,300.200};
-    Color lc2={255,200.200};
-    Lights[1]=(struct Light){Pos2,lc2,100000.0};
-    Scene scene=(struct Scene){2,2,Objects,Lights};
-    Image I=NewImage(1920,1080);
-    X=1920,Y=1080;
-    for(x=0;x<60;x++)
-  {
-    scene.Lights[1].pos.x-=2.0;
-    RTRender(&I,cam,scene);   
+    Objects[2]=Obj3;
+    Objects[3]=Obj4;
+    Objects[4]=Obj5;
+    Objects[5]=Obj6;
     
-  }
-  bmpinit(1920,1080);
-  bmpdraw(I);
-  bmpsave("RT4.bmp",1920,1080);
+    Light *Lights=(Light*)malloc(sizeof(Light)*2);
+    Point Pos={50,550,30};
+    Color lc1={255,255,255};
+    Lights[0]=(struct Light){Pos,lc1,800000.0/255};
+    
+    Point Pos2={520,120,10};
+    Color lc2={200,100,100};
+    Lights[1]=(struct Light){Pos2,lc2,300000.0/255};
+    
+    Scene scene=(struct Scene){5,2,Objects,Lights};
+        
+    for(x=0;x<FRAMES;x++)
+	{
+	    //scene.Lights[1].pos.x-=1.0;
+	    RTRender(I,cam,scene);       
+	}
 }
